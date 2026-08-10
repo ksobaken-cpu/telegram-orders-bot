@@ -3,6 +3,9 @@ import os
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from dotenv import load_dotenv
+load_dotenv()
+TOKEN = os.getenv("BOT_TOKEN")
 import openpyxl
 
 os.environ['HTTP_PROXY'] = ''
@@ -10,7 +13,7 @@ os.environ['HTTPS_PROXY'] = ''
 os.environ['ALL_PROXY'] = ''
 
 # Настройки бота
-TOKEN = "8746914237:AAEYpiy5SyFOhMGvmI5vK5-y8YztNnLu9So"
+TOKEN = "8746914237:AAG9fKVPxxZ2luRdHawIApDxXi7tlbMFCsk"
 ADMIN_ID = 876876919  # Вставьте сюда ваш ID (число)
 
 bot = Bot(token=TOKEN)
