@@ -40,13 +40,40 @@ class OrderForm(StatesGroup):
     details = State()
 
 
-# Красивое сохранение и форматирование Excel
+# Главное меню (всегда зафиксировано внизу)
+def get_main_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📝 Оставить заявку")]],
+        resize_keyboard=True,
+    )
+
+
+# Клавиатура выбора категорий + кнопка отмены
+def get_categories_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🛠 Техподдержка"), KeyboardButton(text="💳 Вопросы по оплате")],
+            [KeyboardButton(text="💡 Идея / Предложение"), KeyboardButton(text="❓ Другое")],
+            [KeyboardButton(text="❌ Отмена")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+# Клавиатура только с кнопкой отмены (на этапе ввода текста)
+def get_cancel_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        resize_keyboard=True,
+    )
+
+
+# Красивое сохранение в Excel
 def save_to_excel(category, user_name, user_id, text):
     try:
         date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         headers = ["Дата и время", "Категория", "Имя", "ID пользователя", "Текст заявки", "Статус"]
 
-        # Если файла нет — создаем его
         if not os.path.exists(EXCEL_FILE):
             wb = openpyxl.Workbook()
             ws = wb.active
@@ -56,11 +83,10 @@ def save_to_excel(category, user_name, user_id, text):
             wb = openpyxl.load_workbook(EXCEL_FILE)
             ws = wb.active
 
-        # Добавляем новую строку
         ws.append([date_now, category, user_name, user_id, text, "Новая"])
 
-        # === СТИЛИЗАЦИЯ EXCEL ===
-        header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")  # Тёмно-синий
+        # Стилизация
+        header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
         thin_border = Border(
             left=Side(style='thin', color='D9D9D9'),
@@ -69,21 +95,18 @@ def save_to_excel(category, user_name, user_id, text):
             bottom=Side(style='thin', color='D9D9D9')
         )
 
-        # Оформляем заголовки
         for col_num in range(1, len(headers) + 1):
             cell = ws.cell(row=1, column=col_num)
             cell.fill = header_fill
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
-        # Настраиваем границы и выравнивание для всех строк
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=len(headers)):
             for cell in row:
                 cell.border = thin_border
                 if cell.row > 1:
                     cell.alignment = Alignment(vertical="center")
 
-        # Автоподгон ширины колонок
         for col in ws.columns:
             max_len = 0
             col_letter = get_column_letter(col[0].column)
@@ -99,32 +122,28 @@ def save_to_excel(category, user_name, user_id, text):
         return False
 
 
-# Клавиатура категорий
-def get_categories_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🛠 Техподдержка"), KeyboardButton(text="💳 Вопросы по оплате")],
-            [KeyboardButton(text="💡 Идея / Предложение"), KeyboardButton(text="❓ Другое")],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
+# ОБРАБОТЧИК ОТМЕНЫ (срабатывает на команду /cancel или кнопку "❌ Отмена")
+@dp.message(Command("cancel"))
+@dp.message(F.text == "❌ Отмена")
+async def cancel_handler(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state is None:
+        await message.answer("Нечего отменять.", reply_markup=get_main_keyboard())
+        return
+
+    await state.clear()
+    await message.answer("🚫 Создание заявки отменено.", reply_markup=get_main_keyboard())
 
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, state: FSMContext):
     await state.clear()
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📝 Оставить заявку")]],
-        resize_keyboard=True,
-    )
     await message.answer(
         f"Привет, {message.from_user.first_name}! 👋\nНажми кнопку ниже, чтобы оформить заявку.",
-        reply_markup=kb,
+        reply_markup=get_main_keyboard(),
     )
 
 
-# Выгрузка Excel для админа
 @dp.message(Command("get_excel"))
 async def send_excel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -149,9 +168,9 @@ async def process_category(message: types.Message, state: FSMContext):
     await state.set_state(OrderForm.details)
 
     await message.answer(
-        f"Выбрана категория: **{message.text}**\n\nТеперь опишите вашу проблему или вопрос текстом:",
+        f"Выбрана категория: **{message.text}**\n\nТеперь опишите вашу проблему или вопрос текстом (или нажмите «❌ Отмена»):",
         parse_mode="Markdown",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=get_cancel_keyboard(),
     )
 
 
@@ -186,9 +205,15 @@ async def process_details(message: types.Message, state: FSMContext):
         print(f"Ошибка отправки админу: {e}")
 
     if saved:
-        await message.answer(f"✅ Спасибо, {user_name}! Ваша заявка по теме «{category}» принята.")
+        await message.answer(
+            f"✅ Спасибо, {user_name}! Ваша заявка по теме «{category}» принята.",
+            reply_markup=get_main_keyboard(),
+        )
     else:
-        await message.answer("⚠️ Заявка отправлена менеджеру, но пока не записана в файл (файл открыт).")
+        await message.answer(
+            "⚠️ Заявка отправлена менеджеру, но пока не записана в файл.",
+            reply_markup=get_main_keyboard(),
+        )
 
     await state.clear()
 
