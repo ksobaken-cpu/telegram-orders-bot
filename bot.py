@@ -2,6 +2,9 @@ import asyncio
 import os
 from datetime import datetime
 import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -32,26 +35,63 @@ dp = Dispatcher()
 EXCEL_FILE = "orders.xlsx"
 
 
-# Определяем состояния диалога (FSM)
 class OrderForm(StatesGroup):
-    category = State()  # Ожидаем выбор категории
-    details = State()   # Ожидаем текст заявки
+    category = State()
+    details = State()
 
 
-# Сохранение в Excel с категорией
+# Красивое сохранение и форматирование Excel
 def save_to_excel(category, user_name, user_id, text):
     try:
         date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        headers = ["Дата и время", "Категория", "Имя", "ID пользователя", "Текст заявки", "Статус"]
+
+        # Если файла нет — создаем его
         if not os.path.exists(EXCEL_FILE):
             wb = openpyxl.Workbook()
             ws = wb.active
             ws.title = "Заявки"
-            ws.append(["Дата и время", "Категория", "Имя", "ID пользователя", "Текст заявки", "Статус"])
-            wb.save(EXCEL_FILE)
+            ws.append(headers)
+        else:
+            wb = openpyxl.load_workbook(EXCEL_FILE)
+            ws = wb.active
 
-        wb = openpyxl.load_workbook(EXCEL_FILE)
-        ws = wb.active
+        # Добавляем новую строку
         ws.append([date_now, category, user_name, user_id, text, "Новая"])
+
+        # === СТИЛИЗАЦИЯ EXCEL ===
+        header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")  # Тёмно-синий
+        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        thin_border = Border(
+            left=Side(style='thin', color='D9D9D9'),
+            right=Side(style='thin', color='D9D9D9'),
+            top=Side(style='thin', color='D9D9D9'),
+            bottom=Side(style='thin', color='D9D9D9')
+        )
+
+        # Оформляем заголовки
+        for col_num in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Настраиваем границы и выравнивание для всех строк
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=len(headers)):
+            for cell in row:
+                cell.border = thin_border
+                if cell.row > 1:
+                    cell.alignment = Alignment(vertical="center")
+
+        # Автоподгон ширины колонок
+        for col in ws.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
+
         wb.save(EXCEL_FILE)
         return True
     except PermissionError:
@@ -97,33 +137,29 @@ async def send_excel(message: types.Message):
         await message.answer("⚠️ Файл с заявками пока не создан.")
 
 
-# Шаг 1: Нажатие "Оставить заявку" -> Показываем категории
 @dp.message(F.text == "📝 Оставить заявку")
 async def start_order(message: types.Message, state: FSMContext):
     await state.set_state(OrderForm.category)
     await message.answer("Выберите тему вашей заявки из меню ниже:", reply_markup=get_categories_keyboard())
 
 
-# Шаг 2: Выбор категории -> Запрашиваем подробности
 @dp.message(OrderForm.category)
 async def process_category(message: types.Message, state: FSMContext):
-    # Сохраняем выбранную категорию в контекст состояния
     await state.update_data(chosen_category=message.text)
     await state.set_state(OrderForm.details)
 
     await message.answer(
         f"Выбрана категория: **{message.text}**\n\nТеперь опишите вашу проблему или вопрос текстом:",
         parse_mode="Markdown",
-        reply_markup=ReplyKeyboardRemove(),  # Убираем кнопки категорий
+        reply_markup=ReplyKeyboardRemove(),
     )
 
 
-# Шаг 3: Получение текста заявки -> Финал и отправка админу
 @dp.message(OrderForm.details)
 async def process_details(message: types.Message, state: FSMContext):
     data = await state.get_data()
     category = data.get("chosen_category", "Не указана")
-    
+
     user_name = message.from_user.full_name
     username = f"@{message.from_user.username}" if message.from_user.username else "нет юзернейма"
     user_id = message.from_user.id
@@ -152,9 +188,8 @@ async def process_details(message: types.Message, state: FSMContext):
     if saved:
         await message.answer(f"✅ Спасибо, {user_name}! Ваша заявка по теме «{category}» принята.")
     else:
-        await message.answer("⚠️ Заявка отправлена менеджеру, но пока не записана в файл.")
+        await message.answer("⚠️ Заявка отправлена менеджеру, но пока не записана в файл (файл открыт).")
 
-    # Очищаем состояние
     await state.clear()
 
 
